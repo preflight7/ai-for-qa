@@ -18,8 +18,12 @@
 (function (root) {
   const key = (testId, stepId) => testId + ':' + stepId;
   const isRealAnchor = sel => !!sel && /^[\[#]/.test(sel);
+  const VALID_POLICIES = { auto: 1, review_only: 1, never_heal: 1 };
 
   function makeBrain(seed) {
+    // Records are shape {locator?, confidence?, policy?}. Policy may exist WITHOUT
+    // a cached locator (a user can pin a policy for a step that has never healed).
+    // Default policy when unset is 'auto'.
     const data = Object.assign({}, seed);
 
     // get(testId, stepId, doc?) -> {el, locator} on a unique live hit, else null (cold miss).
@@ -40,8 +44,25 @@
     function put(testId, stepId, locator, verification) {
       if (!verification || verification.confidence !== 'HIGH') return false;   // OV#4 guard
       if (!isRealAnchor(locator)) return false;                                 // real-anchor-only rule
-      data[key(testId, stepId)] = { locator, confidence: verification.confidence };
+      const k = key(testId, stepId);
+      const prev = data[k] || {};
+      data[k] = { locator, confidence: verification.confidence, policy: prev.policy || 'auto' };
       return true;
+    }
+
+    // Per-key heal policy. Independent of the cache write path so an operator can
+    // pin a policy on a key that has never healed (e.g. lock a brittle step to
+    // never_heal before it ever mis-fires). Returns false on unknown policy.
+    function setPolicy(testId, stepId, policy) {
+      if (!VALID_POLICIES[policy]) return false;
+      const k = key(testId, stepId);
+      const prev = data[k] || {};
+      data[k] = Object.assign({}, prev, { policy });
+      return true;
+    }
+    function getPolicy(testId, stepId) {
+      const rec = data[key(testId, stepId)];
+      return (rec && rec.policy) || 'auto';
     }
 
     // deep-enough copy: records are flat {locator, confidence} — a shallow Object.assign would leak
@@ -64,7 +85,7 @@
       return true;
     }
 
-    return { get, put, snapshot, evict };
+    return { get, put, snapshot, evict, setPolicy, getPolicy };
   }
 
   // ---- adapter: turn one S7 executeLive() result into brain writes for every step that was
