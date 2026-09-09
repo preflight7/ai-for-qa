@@ -84,7 +84,11 @@ const WEB = {
     nameAttr:el.getAttribute('name'), type:el.getAttribute('type'), autocomplete:el.getAttribute('autocomplete'),
     testid:WEB.testid(el), testidAttr:WEB.testidAttr(el), id:el.getAttribute('id'), cls:(el.getAttribute('class')||'').trim()||null,
     inForm:f?true:null, formAction:f?f.getAttribute('action'):null }; },
-  candidates(doc){ return [...doc.querySelectorAll('input,button,a,select,textarea,[role]')].filter(el=>(el.getAttribute('type')||'')!=='hidden'); },
+  // Extended 2026-09-10: also include any test-id-bearing element regardless of role.
+  // Vue/inline-edit apps (n8n, Directus, etc.) commonly use <span>/<div> as widgets
+  // with a data-test-id but no role — without this the matcher can never see them
+  // as candidates and abstains with 'no-identity' on drift.
+  candidates(doc){ return [...doc.querySelectorAll('input,button,a,select,textarea,[role],[data-testid],[data-test-id],[data-test],[data-cy]')].filter(el=>(el.getAttribute('type')||'')!=='hidden'); },
   // pre-act gate — "found != usable" (web). Returns a `reason` so abstain can be diagnosed precisely.
   actionable(el){ const cs=getComputedStyle(el); const r=el.getBoundingClientRect();
     const hasSize=r.width>1&&r.height>1;
