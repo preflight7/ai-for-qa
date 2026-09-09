@@ -71,11 +71,18 @@ const WEB = {
     const v=el.getAttribute('value'); if(v)return v.trim();
     const t=(el.textContent||'').replace(/\s+/g,' ').trim(); if(t&&t.length<=40)return t;
     return (el.getAttribute('placeholder')||'').trim(); },
-  testid(el){ for(const a of['data-testid','data-test','data-qa','data-cy','data-automation']){ const v=el.getAttribute(a); if(v)return v; } return null; },
+  // Recognized test-id attribute names in preference order. Extended 2026-09-09
+  // to include 'data-test-id' (hyphenated form used by n8n, Vue apps).
+  _testidAttrs: ['data-testid','data-test-id','data-test','data-qa','data-cy','data-automation'],
+  testid(el){ for(const a of WEB._testidAttrs){ const v=el.getAttribute(a); if(v)return v; } return null; },
+  // Which attribute the current element uses for its test-id. Returns null when
+  // no recognized attribute is present. Feeds bestLocator so the emitted
+  // selector uses the SAME attribute name (`data-test-id='X'` not `data-testid='X'`).
+  testidAttr(el){ for(const a of WEB._testidAttrs){ if(el.getAttribute(a)!=null)return a; } return null; },
   extract(el,doc){ const f=el.closest&&el.closest('form'); return {
     role:WEB.roleOf(el), tag:el.tagName.toLowerCase(), name:WEB.nameOf(el,doc),
     nameAttr:el.getAttribute('name'), type:el.getAttribute('type'), autocomplete:el.getAttribute('autocomplete'),
-    testid:WEB.testid(el), id:el.getAttribute('id'), cls:(el.getAttribute('class')||'').trim()||null,
+    testid:WEB.testid(el), testidAttr:WEB.testidAttr(el), id:el.getAttribute('id'), cls:(el.getAttribute('class')||'').trim()||null,
     inForm:f?true:null, formAction:f?f.getAttribute('action'):null }; },
   candidates(doc){ return [...doc.querySelectorAll('input,button,a,select,textarea,[role]')].filter(el=>(el.getAttribute('type')||'')!=='hidden'); },
   // pre-act gate — "found != usable" (web). Returns a `reason` so abstain can be diagnosed precisely.
@@ -131,7 +138,7 @@ function match(doc, desc, adapter){ return verdict(rank(doc, desc, adapter)); }
 
 // ---- bestLocator: strongest available anchor; drives heal-vs-flag ----
 function bestLocator(ex){
-  if(ex.testid)                       return {sel:`[data-testid='${ex.testid}']`, tier:'testid'};
+  if(ex.testid)                       return {sel:`[${ex.testidAttr||'data-testid'}='${ex.testid}']`, tier:'testid'};
   if(ex.id && !looksHashed(ex.id))    return {sel:`#${ex.id}`,                    tier:'stable-id'};
   if(ex.id && looksHashed(ex.id)){ const m=String(ex.id).match(/[-_:]([A-Za-z]{3,}[A-Za-z0-9_-]*)$/); if(m) return {sel:`[id$='${m[0]}']`, tier:'id-fragment'}; }
   if(ex.nameAttr)                     return {sel:`[name='${ex.nameAttr}']`,       tier:'form-name'};
