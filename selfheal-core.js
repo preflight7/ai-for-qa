@@ -259,6 +259,43 @@ function matchStep(doc, step, opts={}){
   return {verdict:vd.v, best:vd.best, margin:vd.margin, diagnosis: diagnose(ranked, vd), cands, ranked};
 }
 
+// ---- emit-with-uniqueness: single source of truth for match+serialize ----
+// Bug the fix closes (2026-09-09): matchStep returns the winner element but
+// callers were separately calling bestLocator(vd.best.ex) to serialize a
+// selector, with NO cardinality check on the emitted string against the
+// current DOM. When the winner inherits an attribute (e.g. a testid supplied
+// by an underlying component-library primitive that also lives on siblings)
+// the emitted selector can be ambiguous even though the matcher picked the
+// right element. captureStep already checks uniqueness at record-time
+// (uniqueAtRecord); this is the same invariant at match-time.
+//
+// Contract: same shape as matchStep + {bestLocator, tier} on the returned
+// object. If verdict was 'heal' but the CSS-form emitted selector matches
+// more than one element in `doc`, downgrade to abstain with
+// diagnosis:'ambiguous-emit'. role= form is not CSS-selectable and is
+// returned unchanged (callers use Playwright's role locator for those).
+function matchAndEmit(doc, step, opts={}){
+  const r = matchStep(doc, step, opts);
+  if(r.verdict !== 'heal' || !r.best){
+    return Object.assign({}, r, {bestLocator:null, tier:'none'});
+  }
+  const loc = bestLocator(r.best.ex);
+  const sel = loc.sel;
+  const tier = loc.tier;
+  // role= form isn't querySelector-able; trust the caller's locator engine.
+  const isCss = sel && /^[\[#]/.test(sel);
+  if(isCss){
+    let count = 0;
+    try { count = doc.querySelectorAll(sel).length; } catch(e) { count = 0; }
+    if(count !== 1){
+      return {verdict:'abstain', best:r.best, margin:r.margin,
+              bestLocator:sel, tier, diagnosis:'ambiguous-emit',
+              emitCount:count, cands:r.cands, ranked:r.ranked};
+    }
+  }
+  return Object.assign({}, r, {bestLocator:sel, tier});
+}
+
 // ---- verify-by-effect: confirm the declared effect happened (catches a WRONG heal) ----
 function verifyEffect(before, after, expect){
   if(!expect || !expect.type) return true;
@@ -273,6 +310,6 @@ function verifyEffect(before, after, expect){
 
 // (CommonJS-style export guard; harmless in the browser)
 const SELFHEAL = {DEF,DURA,TH,fuzzy,mv,buildFromEx,scoreEx,verdict,predicted,WEB,IOS,rank,match,looksHashed,
-  bestLocator,flagOf,captureStep,descFromStep,isShown,isEnabled,resolveScope,diagnose,matchStep,verifyEffect,noAnchorVeto};
+  bestLocator,flagOf,captureStep,descFromStep,isShown,isEnabled,resolveScope,diagnose,matchStep,matchAndEmit,verifyEffect,noAnchorVeto};
 if (typeof module!=='undefined' && module.exports) module.exports = SELFHEAL;
 if (typeof window!=='undefined') window.SELFHEAL = SELFHEAL;

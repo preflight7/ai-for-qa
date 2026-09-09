@@ -181,6 +181,43 @@ function runAll(){
     metrics.E6_namedReasons={before:0, after:Math.round(100*named/reasons.length), unit:'% non-heals with a named reason', reasons};
   }
 
+  // ===================================================================== E8 matchAndEmit ambiguity firewall (2026-09-09)
+  // Regression for the D5 finding: matchStep picks the correct winner, but the
+  // winner's extracted features include a testid inherited from a shared
+  // component-library primitive that also lives on siblings. bestLocator(ex)
+  // would emit that testid unconditionally; the OLD path shipped it to the
+  // caller and Playwright's strict-mode throws on click. matchAndEmit must
+  // downgrade to abstain with diagnosis 'ambiguous-emit'.
+  test('E8.matchAndEmit-ambiguous: winner testid also on sibling -> abstain', ()=>{
+    // Record: a button with a unique testid at record-time.
+    const rec = parse(`<div><button data-testid="mine" aria-label="Menu">Menu</button></div>`);
+    const step = captureStep(rec.querySelector('button'), rec, {stepId:'s1', action:'click'});
+    // Live DOM: our testid is gone; the winner still carries a SHARED testid
+    // (as if the underlying component-library primitive supplied one).
+    const live = mount(`<div>
+      <button data-testid="shared" aria-label="Menu">Menu</button>
+      <button data-testid="shared" aria-label="More tools">More</button>
+    </div>`);
+    try {
+      const r = S.matchAndEmit(live, step, {gate:true});
+      eq(r.verdict, 'abstain', 'must abstain — emitted selector is ambiguous');
+      eq(r.diagnosis, 'ambiguous-emit');
+      eq(r.bestLocator, "[data-testid='shared']", 'exposes the ambiguous selector');
+      eq(r.emitCount, 2, 'reports how many the emitted selector matched');
+    } finally { unmount(live); }
+  });
+  test('E8.matchAndEmit-unique: winner testid unique -> heal', ()=>{
+    const rec = parse(`<div><button data-testid="save" aria-label="Save">Save</button></div>`);
+    const step = captureStep(rec.querySelector('button'), rec, {stepId:'s1', action:'click'});
+    const live = mount(`<div><button data-testid="save" aria-label="Save">Save</button><button data-testid="cancel">Cancel</button></div>`);
+    try {
+      const r = S.matchAndEmit(live, step, {gate:true});
+      eq(r.verdict, 'heal');
+      eq(r.bestLocator, "[data-testid='save']");
+      eq(r.diagnosis, null);
+    } finally { unmount(live); }
+  });
+
   return {passed, failed, total:passed+failed, cases, metrics};
 }
 
